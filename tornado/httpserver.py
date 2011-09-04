@@ -80,6 +80,9 @@ class HTTPServer(object):
     ensure the connection is closed on every request no matter what HTTP
     version the client is using.
 
+    If connection_timeout is set, HTTP keep-alive connections will be closed
+    after that many seconds of inactivity.
+
     If xheaders is True, we support the X-Real-Ip and X-Scheme headers,
     which override the remote IP and HTTP scheme for all requests. These
     headers are useful when running Tornado behind a reverse proxy or
@@ -133,9 +136,10 @@ class HTTPServer(object):
        `tornado.netutil.bind_sockets`.
     """
     def __init__(self, request_callback, no_keep_alive=False, io_loop=None,
-                 xheaders=False, ssl_options=None):
+                 xheaders=False, ssl_options=None, connection_timeout=-1):
         self.request_callback = request_callback
         self.no_keep_alive = no_keep_alive
+        self.connection_timeout = connection_timeout
         self.io_loop = io_loop
         self.xheaders = xheaders
         self.ssl_options = ssl_options
@@ -265,7 +269,8 @@ class HTTPServer(object):
                 # Unix (or other) socket; fake the remote address
                 address = ('0.0.0.0', 0)
             HTTPConnection(stream, address, self.request_callback,
-                           self.no_keep_alive, self.xheaders)
+                           self.no_keep_alive, self.xheaders,
+                           self.connection_timeout)
         except Exception:
             logging.error("Error in connection callback", exc_info=True)
 
@@ -280,11 +285,12 @@ class HTTPConnection(object):
     until the HTTP conection is closed.
     """
     def __init__(self, stream, address, request_callback, no_keep_alive=False,
-                 xheaders=False):
+                 xheaders=False, connection_timeout=-1):
         self.stream = stream
         self.address = address
         self.request_callback = request_callback
         self.no_keep_alive = no_keep_alive
+        self.connection_timeout = connection_timeout
         self.xheaders = xheaders
         self._request = None
         self._request_finished = False
@@ -292,6 +298,28 @@ class HTTPConnection(object):
         # contexts from one request from leaking into the next.
         self._header_callback = stack_context.wrap(self._on_headers)
         self.stream.read_until(b("\r\n\r\n"), self._header_callback)
+        self._timeout_handle = None
+        self.reset_connection_timeout()
+
+    def reset_connection_timeout(self):
+        if self.connection_timeout == -1:
+            return
+        self.remove_connection_timeout()
+        self._timeout_handle = self.stream.io_loop.add_timeout(
+            time.time() + self.connection_timeout, self._handle_timeout)
+
+    def remove_connection_timeout(self):
+        if self._timeout_handle:
+            self.stream.io_loop.remove_timeout(self._timeout_handle)
+
+    def _handle_timeout(self):
+        if self.stream.closed():
+            return
+        
+        if self.stream.writing():
+            self.reset_connection_timeout()
+        else:
+            self.stream.close()
 
     def write(self, chunk):
         """Writes a chunk of output to the stream."""
@@ -327,10 +355,13 @@ class HTTPConnection(object):
         if disconnect:
             self.stream.close()
             return
+        else:
+            self.reset_connection_timeout()
         self.stream.read_until(b("\r\n\r\n"), self._header_callback)
 
     def _on_headers(self, data):
         try:
+            self.reset_connection_timeout()
             data = native_str(data.decode('latin1'))
             eol = data.find("\r\n")
             start_line = data[:eol]
@@ -363,6 +394,7 @@ class HTTPConnection(object):
             return
 
     def _on_request_body(self, data):
+        self.reset_connection_timeout()
         self._request.body = data
         content_type = self._request.headers.get("Content-Type", "")
         if self._request.method in ("POST", "PUT"):
