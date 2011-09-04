@@ -115,6 +115,8 @@ class WebSocketHandler(tornado.web.RequestHandler):
             self.stream.close()
             return
 
+        self.request.connection.remove_connection_timeout()
+
         # The difference between version 8 and 13 is that in 8 the
         # client sends a "Sec-Websocket-Origin" header and in 13 it's
         # simply "Origin".
