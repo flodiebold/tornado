@@ -5,10 +5,11 @@ communication between the browser and server.
 
 .. warning::
 
-   The WebSocket protocol is still in development.  This module currently
-   implements the "draft76" version of the protocol, which is supported
-   only by Chrome and Safari.  See this `browser compatibility table 
-   <http://en.wikipedia.org/wiki/WebSockets#Browser_support>`_ on Wikipedia.
+   The WebSocket protocol is still in development.  This module
+   currently implements the "hixie-76", "hybi-10", and "hybi-17"
+   versions of the protocol.  See this `browser compatibility table
+   <http://en.wikipedia.org/wiki/WebSockets#Browser_support>`_ on
+   Wikipedia.
 """
 # Author: Jacob Kristhammar, 2010
 
@@ -31,7 +32,12 @@ class WebSocketHandler(tornado.web.RequestHandler):
 
     See http://www.w3.org/TR/2009/WD-websockets-20091222/ for details on the
     JavaScript interface. This implement the protocol as specified at
+    http://tools.ietf.org/html/draft-ietf-hybi-thewebsocketprotocol-17
+    The older protocol versions specified at
+    http://tools.ietf.org/html/draft-ietf-hybi-thewebsocketprotocol-10
+    and 
     http://tools.ietf.org/html/draft-hixie-thewebsocketprotocol-76.
+    are also supported.
 
     Here is an example Web Socket handler that echos back all received messages
     back to the client::
@@ -78,8 +84,10 @@ class WebSocketHandler(tornado.web.RequestHandler):
 
         self.request.connection.remove_connection_timeout()
 
-        if (self.request.headers.get("Sec-WebSocket-Version") == "8" or
-            self.request.headers.get("Sec-WebSocket-Version") == "7"):
+        # The difference between version 8 and 13 is that in 8 the
+        # client sends a "Sec-Websocket-Origin" header and in 13 it's
+        # simply "Origin".
+        if self.request.headers.get("Sec-WebSocket-Version") in ("7", "8", "13"):
             self.ws_connection = WebSocketProtocol8(self)
             self.ws_connection.accept_connection()
             
