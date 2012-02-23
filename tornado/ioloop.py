@@ -313,6 +313,11 @@ class IOLoop(object):
                     else:
                         logging.error("Exception in I/O handler for fd %s",
                                       fd, exc_info=True)
+                except KeyError:
+                    try:
+                        self._impl.unregister(fd)
+                    except (OSError, IOError):
+                        logging.warn("Error deleting fd from IOLoop", exc_info=True)
                 except Exception:
                     logging.error("Exception in I/O handler for fd %s",
                                   fd, exc_info=True)
